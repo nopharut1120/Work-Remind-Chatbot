@@ -5,9 +5,9 @@ services:
     buildCommand: npm install
     startCommand: node src/index.js
     envVars:
-      - key: 5xtp8ubtvagywBwUzogH+jSJ+/fuzqCrvDvKUYNipl8Z4tZp72LUmb9ixOaQ15Ns+x7JhlqZe5RZiFjKAyt+5P7ad8YWGJQ3xbto9muuJYUZc+dpFKK3oRHR2+opqdrhkjN8UQpAL6lOO4QrmYy5GAdB04t89/1O/w1cDnyilFU=
+      - key: LINE_CHANNEL_ACCESS_TOKEN
         sync: false
-      - key: c0b51909227b313adfc2de647f104462
+      - key: LINE_CHANNEL_SECRET
         sync: false
       - key: LINE_OWNER_USER_ID
         sync: false

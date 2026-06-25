@@ -151,4 +151,40 @@ async function getStats(groupId) {
   };
 }
 
-module.exports = { loadTasks, createTask, updateTaskStatus, deleteTask, getStats };
+// รีเซ็ต Routine ทุกตัวกลับเป็น pending (รันตอนเที่ยงคืน)
+async function resetRoutineTasks() {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A2:K`,
+  });
+  const rows = res.data.values || [];
+
+  const updates = [];
+  rows.forEach((row, idx) => {
+    const type   = row[2] || '';
+    const status = row[7] || '';
+    if (type === 'routine' && status === 'done') {
+      const rowNum = idx + 2;
+      const updated = [...row];
+      updated[7] = 'pending';                        // status
+      updated[9] = new Date().toISOString();         // updatedAt
+      updated[10] = '';                              // doneAt
+      updates.push({
+        range: `${SHEET_NAME}!A${rowNum}:K${rowNum}`,
+        values: [updated],
+      });
+    }
+  });
+
+  if (!updates.length) return 0;
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: { valueInputOption: 'RAW', data: updates },
+  });
+
+  return updates.length;
+}
+
+module.exports = { loadTasks, createTask, updateTaskStatus, deleteTask, getStats, resetRoutineTasks };

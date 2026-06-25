@@ -1,7 +1,7 @@
 const express = require('express');
 const line = require('@line/bot-sdk');
 const cron = require('node-cron');
-const { loadTasks, createTask, updateTaskStatus, deleteTask, getStats } = require('./tasks');
+const { loadTasks, createTask, updateTaskStatus, deleteTask, getStats, resetRoutineTasks } = require('./tasks');
 
 const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -31,6 +31,22 @@ function startNotifyJob() {
 }
 
 startNotifyJob();
+
+// รีเซ็ต Routine ทุกวัน เที่ยงคืน (00:00 Bangkok)
+cron.schedule('0 0 * * *', async () => {
+  try {
+    const count = await resetRoutineTasks();
+    console.log(`[Reset] รีเซ็ต Routine ${count} รายการ`);
+    if (OWNER_USER_ID && count > 0) {
+      await client.pushMessage(OWNER_USER_ID, {
+        type: 'text',
+        text: `🔄 รีเซ็ต Routine ${count} รายการแล้ว พร้อมสำหรับวันใหม่!`,
+      });
+    }
+  } catch (e) {
+    console.error('Reset routine error:', e.message);
+  }
+}, { timezone: 'Asia/Bangkok' });
 
 app.post('/webhook', line.middleware(config), async (req, res) => {
   res.sendStatus(200);

@@ -22,7 +22,7 @@ function startNotifyJob() {
   if (notifyJob) notifyJob.stop();
   // รัน cron ทุกชั่วโมง แล้วเช็คเองว่าถึงรอบแจ้งเตือนหรือยัง
   let counter = 0;
-  notifyJob = cron.schedule('0 7-22 * * *', async () => {
+  notifyJob = cron.schedule('0 7-19 * * *', async () => {
     counter++;
     if (counter % notifyInterval === 0) {
       await sendNotification();

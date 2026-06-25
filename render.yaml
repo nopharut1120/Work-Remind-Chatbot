@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: line-task-bot
+    env: node
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: 5xtp8ubtvagywBwUzogH+jSJ+/fuzqCrvDvKUYNipl8Z4tZp72LUmb9ixOaQ15Ns+x7JhlqZe5RZiFjKAyt+5P7ad8YWGJQ3xbto9muuJYUZc+dpFKK3oRHR2+opqdrhkjN8UQpAL6lOO4QrmYy5GAdB04t89/1O/w1cDnyilFU=
+        sync: false
+      - key: c0b51909227b313adfc2de647f104462
+        sync: false
+      - key: LINE_OWNER_USER_ID
+        sync: false
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1

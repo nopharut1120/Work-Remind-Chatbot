@@ -1,64 +1,138 @@
-const fs = require('fs').promises;
-const path = require('path');
+const { google } = require('googleapis');
 const crypto = require('crypto');
 
-const DATA_FILE = path.join(__dirname, '../data/tasks.json');
+const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
+const SHEET_NAME = 'tasks';
 
-async function readData() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+const COLS = ['id','name','type','deadline','assignee','groupId','createdBy','status','createdAt','updatedAt','doneAt'];
+
+function getAuth() {
+  return new google.auth.JWT(
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    null,
+    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    ['https://www.googleapis.com/auth/spreadsheets']
+  );
 }
 
-async function writeData(tasks) {
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  await fs.writeFile(DATA_FILE, JSON.stringify(tasks, null, 2));
+function getSheets() {
+  return google.sheets({ version: 'v4', auth: getAuth() });
 }
+
+async function readRows() {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A2:K`,
+  });
+  const rows = res.data.values || [];
+  return rows.map(row => {
+    const obj = {};
+    COLS.forEach((col, i) => obj[col] = row[i] || null);
+    return obj;
+  });
+}
+
+async function appendRow(task) {
+  const sheets = getSheets();
+  const row = COLS.map(col => task[col] || '');
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [row] },
+  });
+}
+
+async function updateRow(taskId, fields) {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A2:K`,
+  });
+  const rows = res.data.values || [];
+  const idx = rows.findIndex(r => r[0] === taskId);
+  if (idx === -1) return null;
+
+  const rowNum = idx + 2;
+  const existing = {};
+  COLS.forEach((col, i) => existing[col] = rows[idx][i] || null);
+  const updated = { ...existing, ...fields };
+  const newRow = COLS.map(col => updated[col] || '');
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A${rowNum}:K${rowNum}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [newRow] },
+  });
+  return updated;
+}
+
+async function deleteRow(taskId) {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A2:K`,
+  });
+  const rows = res.data.values || [];
+  const idx = rows.findIndex(r => r[0] === taskId);
+  if (idx === -1) return;
+
+  const rowNum = idx + 2;
+  const sheetRes = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+  const sheet = sheetRes.data.sheets.find(s => s.properties.title === SHEET_NAME);
+  const sheetId = sheet.properties.sheetId;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: rowNum - 1, endIndex: rowNum },
+        },
+      }],
+    },
+  });
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 async function loadTasks(groupId) {
-  const all = await readData();
-  if (!groupId) return all; // ถ้าไม่ระบุ groupId ให้ return ทั้งหมด
+  const all = await readRows();
+  if (!groupId) return all;
   return all.filter(t => t.groupId === groupId);
 }
 
 async function createTask({ name, type, deadline, assignee, groupId, createdBy }) {
-  const tasks = await readData();
   const task = {
     id: crypto.randomUUID(),
     name,
-    type,         // 'routine' | 'task'
-    deadline,     // 'YYYY-MM-DD'
+    type,
+    deadline,
     assignee,
     groupId,
     createdBy,
     status: 'pending',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    doneAt: null,
+    doneAt: '',
   };
-  tasks.push(task);
-  await writeData(tasks);
+  await appendRow(task);
   return task;
 }
 
 async function updateTaskStatus(taskId, status) {
-  const tasks = await readData();
-  const idx = tasks.findIndex(t => t.id === taskId);
-  if (idx === -1) return null;
-  tasks[idx].status = status;
-  tasks[idx].updatedAt = new Date().toISOString();
-  if (status === 'done') tasks[idx].doneAt = new Date().toISOString();
-  await writeData(tasks);
-  return tasks[idx];
+  const fields = {
+    status,
+    updatedAt: new Date().toISOString(),
+    ...(status === 'done' ? { doneAt: new Date().toISOString() } : {}),
+  };
+  return updateRow(taskId, fields);
 }
 
 async function deleteTask(taskId) {
-  let tasks = await readData();
-  tasks = tasks.filter(t => t.id !== taskId);
-  await writeData(tasks);
+  await deleteRow(taskId);
 }
 
 async function getStats(groupId) {
@@ -66,19 +140,15 @@ async function getStats(groupId) {
   const today = new Date().toISOString().split('T')[0];
   const todayStart = today + 'T00:00:00.000Z';
 
-  const total   = tasks.length;
-  const pending = tasks.filter(t => t.status !== 'done').length;
-  const done    = tasks.filter(t => t.status === 'done').length;
-  const routine = tasks.filter(t => t.type === 'routine' && t.status !== 'done').length;
-  const task    = tasks.filter(t => t.type === 'task' && t.status !== 'done').length;
-  const overdue = tasks.filter(t =>
-    t.status !== 'done' && t.deadline && t.deadline < today
-  ).length;
-  const doneToday = tasks.filter(t =>
-    t.status === 'done' && t.doneAt && t.doneAt >= todayStart
-  ).length;
-
-  return { total, pending, done, routine, task, overdue, doneToday };
+  return {
+    total:     tasks.length,
+    pending:   tasks.filter(t => t.status !== 'done').length,
+    done:      tasks.filter(t => t.status === 'done').length,
+    routine:   tasks.filter(t => t.type === 'routine' && t.status !== 'done').length,
+    task:      tasks.filter(t => t.type === 'task' && t.status !== 'done').length,
+    overdue:   tasks.filter(t => t.status !== 'done' && t.deadline && t.deadline < today).length,
+    doneToday: tasks.filter(t => t.status === 'done' && t.doneAt && t.doneAt >= todayStart).length,
+  };
 }
 
 module.exports = { loadTasks, createTask, updateTaskStatus, deleteTask, getStats };

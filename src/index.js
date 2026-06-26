@@ -2,36 +2,37 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const cron = require('node-cron');
 const { loadTasks, createTask, updateTaskStatus, deleteTask, getStats, resetRoutineTasks } = require('./tasks');
-
+ 
 const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 const OWNER_USER_ID = process.env.LINE_OWNER_USER_ID;
-
+const GROUP_ID = process.env.LINE_GROUP_ID;
+ 
 const client = new line.Client(config);
 const app = express();
-
+ 
 const sessions = {};
-
+ 
 // ความถี่การแจ้งเตือน (ชั่วโมง) — เปลี่ยนได้ผ่านเมนู
 let notifyInterval = 1; // default ทุก 1 ชั่วโมง
 let notifyJob = null;
-
+ 
 function startNotifyJob() {
   if (notifyJob) notifyJob.stop();
   // รัน cron ทุกชั่วโมง แล้วเช็คเองว่าถึงรอบแจ้งเตือนหรือยัง
   let counter = 0;
-  notifyJob = cron.schedule('0 7-19 * * *', async () => {
+  notifyJob = cron.schedule('0 7-22 * * *', async () => {
     counter++;
     if (counter % notifyInterval === 0) {
       await sendNotification();
     }
   }, { timezone: 'Asia/Bangkok' });
 }
-
+ 
 startNotifyJob();
-
+ 
 // รีเซ็ต Routine ทุกวัน เที่ยงคืน (00:00 Bangkok)
 cron.schedule('0 0 * * *', async () => {
   try {
@@ -47,33 +48,33 @@ cron.schedule('0 0 * * *', async () => {
     console.error('Reset routine error:', e.message);
   }
 }, { timezone: 'Asia/Bangkok' });
-
+ 
 app.post('/webhook', line.middleware(config), async (req, res) => {
   res.sendStatus(200);
   for (const event of req.body.events) {
     try { await handleEvent(event); } catch (e) { console.error(e); }
   }
 });
-
+ 
 app.get('/', (_, res) => res.send('LINE Task Bot is running ✅'));
-
+ 
 // ─── Event Handler ────────────────────────────────────────────────────────────
 async function handleEvent(event) {
   const { type, source, replyToken } = event;
   const groupId = source.groupId || source.roomId || null;
   const userId  = source.userId;
-
+ 
   if (type === 'postback') {
     return handlePostback(event, groupId, userId);
   }
   if (type !== 'message' || event.message.type !== 'text') return;
-
+ 
   const text = event.message.text.trim();
-
+ 
   if (sessions[userId]) {
     return handleSession(event, groupId, userId, text);
   }
-
+ 
   if (text === 'เมนู' || text === 'menu' || text === '/menu') {
     return client.replyMessage(replyToken, mainMenu());
   }
@@ -84,18 +85,18 @@ async function handleEvent(event) {
     return client.replyMessage(replyToken, await summaryMessage(groupId));
   }
 }
-
+ 
 // ─── Postback ────────────────────────────────────────────────────────────────
 async function handlePostback(event, groupId, userId) {
   const { replyToken, postback } = event;
   const data = new URLSearchParams(postback.data);
   const action = data.get('action');
-
+ 
   if (action === 'new_task') {
     sessions[userId] = { step: 'ask_type', groupId };
     return client.replyMessage(replyToken, askTaskType());
   }
-
+ 
   if (action === 'set_type') {
     const taskType = data.get('type');
     sessions[userId] = { ...sessions[userId], type: taskType, step: 'ask_name' };
@@ -104,7 +105,7 @@ async function handlePostback(event, groupId, userId) {
       text: `📝 พิมพ์ชื่องานที่ต้องการสร้าง:\n(ประเภท: ${taskType === 'routine' ? '🔄 Routine (ทำทุกวัน)' : '📌 งานที่ต้องทำ'})`,
     });
   }
-
+ 
   // [FIX 2] รับวันที่แล้วไปถามเวลา
   if (action === 'set_deadline_date') {
     const date = data.get('date');
@@ -114,7 +115,7 @@ async function handlePostback(event, groupId, userId) {
     sessions[userId] = sess;
     return client.replyMessage(replyToken, askTime());
   }
-
+ 
   // [FIX 2] รับเวลาแล้วไปถามผู้รับผิดชอบ
   if (action === 'set_deadline_time') {
     const time = data.get('time');
@@ -127,7 +128,7 @@ async function handlePostback(event, groupId, userId) {
       text: '👤 ระบุชื่อผู้รับผิดชอบ (หรือพิมพ์ "ทีม" ถ้าทำร่วมกัน):',
     });
   }
-
+ 
   // [FIX 1] Routine ไม่มี deadline ข้ามไปถามผู้รับผิดชอบเลย
   if (action === 'set_deadline') {
     const deadline = data.get('date');
@@ -140,32 +141,32 @@ async function handlePostback(event, groupId, userId) {
       text: '👤 ระบุชื่อผู้รับผิดชอบ (หรือพิมพ์ "ทีม" ถ้าทำร่วมกัน):',
     });
   }
-
+ 
   if (action === 'done_task') {
     const taskId = data.get('id');
     await updateTaskStatus(taskId, 'done');
     return client.replyMessage(replyToken, { type: 'text', text: '✅ อัปเดตงานเสร็จแล้ว!' });
   }
-
+ 
   if (action === 'cancel_task') {
     const taskId = data.get('id');
     await deleteTask(taskId);
     return client.replyMessage(replyToken, { type: 'text', text: '🗑️ ลบงานแล้ว' });
   }
-
+ 
   if (action === 'list_tasks') {
     return client.replyMessage(replyToken, await taskListMessage(groupId));
   }
-
+ 
   if (action === 'summary') {
     return client.replyMessage(replyToken, await summaryMessage(groupId));
   }
-
+ 
   // [FIX 3] ตั้งความถี่แจ้งเตือน
   if (action === 'notify_settings') {
     return client.replyMessage(replyToken, notifySettingsMenu());
   }
-
+ 
   if (action === 'set_notify') {
     const interval = parseInt(data.get('interval'));
     notifyInterval = interval;
@@ -176,16 +177,16 @@ async function handlePostback(event, groupId, userId) {
     });
   }
 }
-
+ 
 // ─── Session Flow ─────────────────────────────────────────────────────────────
 async function handleSession(event, groupId, userId, text) {
   const { replyToken } = event;
   const sess = sessions[userId];
-
+ 
   if (sess.step === 'ask_name') {
     sess.name = text;
     sessions[userId] = sess;
-
+ 
     // [FIX 1] ถ้าเป็น Routine ข้ามไปถามผู้รับผิดชอบเลย ไม่ต้องถาม deadline
     if (sess.type === 'routine') {
       sess.deadline = 'ทุกวัน';
@@ -196,13 +197,13 @@ async function handleSession(event, groupId, userId, text) {
         text: '👤 ระบุชื่อผู้รับผิดชอบ (หรือพิมพ์ "ทีม" ถ้าทำร่วมกัน):',
       });
     }
-
+ 
     // งาน One-time ถามวันกำหนดส่ง
     sess.step = 'ask_deadline';
     sessions[userId] = sess;
     return client.replyMessage(replyToken, askDeadlineDate());
   }
-
+ 
   // [FIX 2] รับวันที่พิมพ์เอง แล้วไปถามเวลา
   if (sess.step === 'ask_deadline') {
     sess.deadlineDate = text;
@@ -210,7 +211,7 @@ async function handleSession(event, groupId, userId, text) {
     sessions[userId] = sess;
     return client.replyMessage(replyToken, askTime());
   }
-
+ 
   // [FIX 2] รับเวลาพิมพ์เอง
   if (sess.step === 'ask_time') {
     sess.deadline = `${sess.deadlineDate} ${text}`;
@@ -221,7 +222,7 @@ async function handleSession(event, groupId, userId, text) {
       text: '👤 ระบุชื่อผู้รับผิดชอบ (หรือพิมพ์ "ทีม" ถ้าทำร่วมกัน):',
     });
   }
-
+ 
   if (sess.step === 'ask_assignee') {
     const task = await createTask({
       name: sess.name,
@@ -235,7 +236,7 @@ async function handleSession(event, groupId, userId, text) {
     return client.replyMessage(replyToken, taskCreatedMessage(task));
   }
 }
-
+ 
 // ─── UI Messages ──────────────────────────────────────────────────────────────
 function mainMenu() {
   return {
@@ -259,7 +260,7 @@ function mainMenu() {
     },
   };
 }
-
+ 
 function menuBtn(label, action, color) {
   return {
     type: 'button',
@@ -267,7 +268,7 @@ function menuBtn(label, action, color) {
     style: 'primary', color, margin: 'sm',
   };
 }
-
+ 
 function askTaskType() {
   return {
     type: 'flex',
@@ -292,7 +293,7 @@ function askTaskType() {
     },
   };
 }
-
+ 
 // [FIX 2] แยกเป็น askDeadlineDate และ askTime
 function askDeadlineDate() {
   const today = new Date();
@@ -304,7 +305,7 @@ function askDeadlineDate() {
     const iso = dt.toISOString().split('T')[0];
     return { label: `${label} (${val})`, data: `action=set_deadline_date&date=${iso}` };
   });
-
+ 
   return {
     type: 'flex',
     altText: 'เลือกวันกำหนดส่ง',
@@ -326,7 +327,7 @@ function askDeadlineDate() {
     },
   };
 }
-
+ 
 function askTime() {
   const times = ['08:00', '09:00', '12:00', '17:00', '18:00', '20:00'];
   return {
@@ -359,7 +360,7 @@ function askTime() {
     },
   };
 }
-
+ 
 // [FIX 3] เมนูตั้งค่าความถี่แจ้งเตือน
 function notifySettingsMenu() {
   const options = [
@@ -394,7 +395,7 @@ function notifySettingsMenu() {
     },
   };
 }
-
+ 
 function taskCreatedMessage(task) {
   const typeLabel = task.type === 'routine' ? '🔄 Routine (ทุกวัน)' : '📌 งานที่ต้องทำ';
   return {
@@ -426,15 +427,15 @@ function taskCreatedMessage(task) {
     },
   };
 }
-
+ 
 async function taskListMessage(groupId) {
   const tasks = await loadTasks(groupId);
   const pending = tasks.filter(t => t.status !== 'done');
   if (!pending.length) return { type: 'text', text: '🎉 ไม่มีงานค้างอยู่เลย!' };
-
+ 
   const routines = pending.filter(t => t.type === 'routine');
   const onetime  = pending.filter(t => t.type === 'task');
-
+ 
   const makeSection = (title, items, color) => {
     if (!items.length) return [];
     return [
@@ -455,7 +456,7 @@ async function taskListMessage(groupId) {
       { type: 'separator', margin: 'md' },
     ];
   };
-
+ 
   return {
     type: 'flex',
     altText: `📋 งานทั้งหมด (${pending.length} รายการ)`,
@@ -475,7 +476,7 @@ async function taskListMessage(groupId) {
     },
   };
 }
-
+ 
 async function summaryMessage(groupId) {
   const stats = await getStats(groupId);
   const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
@@ -504,7 +505,7 @@ async function summaryMessage(groupId) {
     },
   };
 }
-
+ 
 function infoRow(label, value) {
   return {
     type: 'box', layout: 'horizontal',
@@ -514,7 +515,7 @@ function infoRow(label, value) {
     ],
   };
 }
-
+ 
 // ─── Notification ─────────────────────────────────────────────────────────────
 async function sendNotification() {
   if (!OWNER_USER_ID || notifyInterval === 99) return;
@@ -524,7 +525,7 @@ async function sendNotification() {
     const pending = tasks.filter(t => t.status !== 'done');
     const overdue = pending.filter(t => t.deadline && t.deadline.split(' ')[0] < new Date().toISOString().split('T')[0]);
     const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' });
-
+ 
     const lines = [
       `🔔 อัปเดตงาน เวลา ${now}`,
       `─────────────────`,
@@ -532,13 +533,13 @@ async function sendNotification() {
       `✅ เสร็จวันนี้: ${stats.doneToday} รายการ`,
       `🚨 เกินกำหนด: ${stats.overdue} รายการ`,
     ];
-
+ 
     if (overdue.length > 0) {
       lines.push('─────────────────');
       lines.push('🚨 งานที่เกินกำหนด:');
       overdue.slice(0, 5).forEach(t => lines.push(`• ${t.name} (${t.assignee}) — ครบ ${t.deadline}`));
     }
-
+ 
     if (pending.length > 0) {
       lines.push('─────────────────');
       lines.push('📋 งานที่ยังค้างอยู่:');
@@ -548,13 +549,16 @@ async function sendNotification() {
       });
       if (pending.length > 5) lines.push(`... และอีก ${pending.length - 5} รายการ`);
     }
-
-    await client.pushMessage(OWNER_USER_ID, { type: 'text', text: lines.join('\n') });
+ 
+    const msg = { type: 'text', text: lines.join('\n') };
+    if (OWNER_USER_ID) await client.pushMessage(OWNER_USER_ID, msg);
+    if (GROUP_ID) await client.pushMessage(GROUP_ID, msg);
     console.log(`[${now}] Sent notification`);
   } catch (e) {
     console.error('Notification error:', e.message);
   }
 }
-
+ 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
+ 

@@ -528,20 +528,20 @@ async function sendNotification() {
  
     const lines = [
       `🔔 อัปเดตงาน เวลา ${now}`,
-      `─────────────────`,
+      `───────────────`,
       `⏳ งานค้าง: ${stats.pending} รายการ`,
       `✅ เสร็จวันนี้: ${stats.doneToday} รายการ`,
       `🚨 เกินกำหนด: ${stats.overdue} รายการ`,
     ];
  
     if (overdue.length > 0) {
-      lines.push('─────────────────');
+      lines.push('───────────────');
       lines.push('🚨 งานที่เกินกำหนด:');
       overdue.slice(0, 5).forEach(t => lines.push(`• ${t.name} (${t.assignee}) — ครบ ${t.deadline}`));
     }
  
     if (pending.length > 0) {
-      lines.push('─────────────────');
+      lines.push('───────────────');
       lines.push('📋 งานที่ยังค้างอยู่:');
       pending.slice(0, 5).forEach(t => {
         const icon = t.type === 'routine' ? '🔄' : '📌';

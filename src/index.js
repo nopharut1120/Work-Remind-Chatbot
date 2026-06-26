@@ -81,22 +81,15 @@ async function handleEvent(event) {
 
   const text = event.message.text.trim();
 
-  // [FIX 1] @ mention — ตัด @ชื่อbot ออกแล้วเช็ค
-  const cleanText = text.replace(/@\S+/g, '').trim();
+  if (sessions[userId]) return handleSession(event, groupId, userId, text);
 
-  if (sessions[userId]) return handleSession(event, groupId, userId, cleanText || text);
-
-  // [FIX 1] ถ้า @ mention หรือพิมพ์เมนู ให้แสดงเมนู
-  const isMention = event.message.mention?.mentionees?.some(m => m.type === 'user') || text.startsWith('@');
-  if (isMention && !cleanText) return client.replyMessage(replyToken, mainMenu());
-
-  if (cleanText === 'เมนู' || cleanText === 'menu' || cleanText === '/menu') {
+  if (text === 'เมนู' || text === 'menu' || text === '/menu') {
     return client.replyMessage(replyToken, mainMenu());
   }
-  if (cleanText === 'งานทั้งหมด' || cleanText === '/tasks') {
+  if (text === 'งานทั้งหมด' || text === '/tasks') {
     return client.replyMessage(replyToken, await taskListMessage(groupId));
   }
-  if (cleanText === 'สรุป' || cleanText === '/summary') {
+  if (text === 'สรุป' || text === '/summary') {
     return client.replyMessage(replyToken, await summaryMessage(groupId));
   }
 }

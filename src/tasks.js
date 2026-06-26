@@ -100,8 +100,8 @@ async function deleteRow(taskId) {
 
 async function loadTasks(groupId) {
   const all = await readRows();
-  if (!groupId) return all;
-  return all.filter(t => t.groupId === groupId);
+  // แสดงทุกงานเสมอ ไม่ filter ตาม groupId
+  return all;
 }
 
 async function createTask({ name, type, deadline, assignee, groupId, createdBy }) {
